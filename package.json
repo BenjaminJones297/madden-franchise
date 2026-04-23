@@ -32,6 +32,7 @@
   "dependencies": {
     "bit-buffer": "^0.2.5",
     "fast-xml-parser": "^5.2.5",
+    "madden-draft-class-tools": "^1.2.0",
     "node-xml-stream-parser": "^1.0.12"
   },
   "repository": {

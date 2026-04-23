@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(npx rollup:*)",
+      "Bash(./node_modules/.bin/tsc --project ./tsconfig.json)",
+      "Bash(./node_modules/.bin/rollup -c)",
+      "Bash(npm install:*)",
+      "Bash(node -e ':*)",
+      "Bash(node --input-type=module --experimental-vm-modules -e ':*)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(cmd.exe /c \"dir /s /b \\\\\"%USERPROFILE%\\\\Documents\\\\Madden*\\\\\" 2>nul\")",
+      "Bash(cmd.exe /c \"dir /s /b \\\\\"%USERPROFILE%\\\\\\\\Documents\\\\\\\\Madden*\\\\\"\")",
+      "Bash(cmd.exe /c \"dir \\\\\"%USERPROFILE%\\\\\\\\Documents\\\\\"\")",
+      "Bash(cmd.exe /c dir \"%USERPROFILE%\\\\Documents\")",
+      "Bash(cmd.exe /c echo %USERPROFILE%)",
+      "Bash(powershell.exe -Command \"Get-ChildItem 'C:\\\\Users\\\\benja\\\\Documents' -ErrorAction SilentlyContinue | Select-Object Name\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem 'C:\\\\Users\\\\benja\\\\OneDrive\\\\Documents' -ErrorAction SilentlyContinue | Select-Object Name\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem 'C:\\\\Users\\\\benja\\\\OneDrive\\\\Documents\\\\Madden NFL 26' -Recurse -Filter 'CAREER-*' | Select-Object FullName\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem 'C:\\\\Users\\\\benja\\\\OneDrive\\\\Documents\\\\Madden NFL 26' -Recurse | Select-Object FullName\")"
+    ]
+  }
+}
