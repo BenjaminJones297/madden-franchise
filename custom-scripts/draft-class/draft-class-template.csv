@@ -1,0 +1,46 @@
+# Draft Class Import Template
+# ─────────────────────────────────────────────────────────────────────────────
+# HOW TO USE
+#   1. Fill in your prospects below (one row per player).
+#   2. Run: node custom-scripts/franchise-updater/index.mjs draftclass custom-scripts/draft-class/draft-class.csv
+#      Or:  node custom-scripts/draft-class/importDraftClass.mjs custom-scripts/draft-class/draft-class.csv
+#
+# FIELD NOTES
+#   Position   : QB HB FB WR TE T G C DE DT MLB OLB CB FS SS K P
+#   Background : EarlyDraftPick | LateDraftPick | Undrafted
+#   College    : NoCollege, or a valid college name from the game (e.g. Alabama,
+#                Michigan, Ohio, FloridaState, Miami — check existing players
+#                in your file for valid values)
+#   Height     : total inches  (e.g. 73 = 6'1",  76 = 6'4")
+#   Weight     : pounds        (e.g. 215)
+#   Ratings    : 0-99 scale.  Leave a cell blank to skip that field.
+#   PLYR_DRAFTROUND / PLYR_DRAFTPICK : optional — set if you want to pre-assign
+#                a slot before the actual draft.
+# ─────────────────────────────────────────────────────────────────────────────
+FirstName,LastName,Position,College,Age,Height,Weight,JerseyNum,Background,PLYR_DRAFTROUND,PLYR_DRAFTPICK,OverallRating,SpeedRating,AwarenessRating,StrengthRating,AgilityRating,AccelerationRating,StaminaRating,InjuryRating,JumpingRating,ThrowPowerRating,ThrowAccuracyShortRating,ThrowAccuracyMidRating,ThrowAccuracyDeepRating,ThrowAccuracyRating,ThrowUnderPressureRating,ThrowOnTheRunRating,PlayActionRating,CatchingRating,CatchInTrafficRating,SpectacularCatchRating,ShortRouteRunningRating,MediumRouteRunningRating,DeepRouteRunningRating,CarryingRating,JukeMoveRating,ElusivenessRating,PassBlockRating,PassBlockPowerRating,PassBlockFinesseRating,RunBlockRating,RunBlockPowerRating,RunBlockFinesseRating,ImpactBlockingRating,BlockSheddingRating,FinesseMovesRating,PowerMovesRating,TackleRating,PursuitRating,PlayRecognitionRating,ZoneCoverageRating,ManCoverageRating,KickPowerRating,KickAccuracyRating,KickReturnRating
+# ── QB ───────────────────────────────────────────────────────────────────────
+Caleb,Armstrong,QB,NoCollege,22,76,225,1,EarlyDraftPick,1,1,80,60,72,65,58,62,78,72,65,90,84,80,76,80,74,78,80,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+# ── HB ───────────────────────────────────────────────────────────────────────
+Marcus,Reed,HB,NoCollege,21,71,210,22,EarlyDraftPick,1,15,78,92,65,72,88,90,78,72,80,,,,,,,,,70,66,74,74,80,72,84,90,82,,,,,,,,,,,,,,,
+# ── WR ───────────────────────────────────────────────────────────────────────
+Tyler,Brooks,WR,NoCollege,22,73,195,11,LateDraftPick,2,44,75,91,60,55,86,88,76,70,80,,,,,,,,,84,72,80,86,82,84,,,,,,,,,,,,,,,,,,,
+# ── TE ───────────────────────────────────────────────────────────────────────
+Jordan,Foster,TE,NoCollege,23,77,250,87,LateDraftPick,3,72,72,75,62,78,74,76,76,72,72,,,,,,,,,76,68,68,74,72,70,,,70,72,72,74,,,,,,,,,,,,
+# ── OT ───────────────────────────────────────────────────────────────────────
+Derek,Powell,T,NoCollege,22,78,310,70,EarlyDraftPick,1,10,77,52,66,88,60,56,80,74,52,,,,,,,,,,,,,,,,,82,85,78,80,82,78,80,,,,,,,,,,,
+# ── iOL (G) ──────────────────────────────────────────────────────────────────
+Alex,Torres,G,NoCollege,23,75,315,65,LateDraftPick,3,80,70,46,60,86,58,52,78,72,50,,,,,,,,,,,,,,,,,80,82,76,82,84,80,78,,,,,,,,,,,
+# ── DT ───────────────────────────────────────────────────────────────────────
+Malik,Gibson,DT,NoCollege,22,75,305,99,EarlyDraftPick,1,8,78,58,68,88,62,64,80,76,60,,,,,,,,,,,,,,,,,,,,,,,76,80,78,80,75,72,68,,,,,,
+# ── DE / Edge ────────────────────────────────────────────────────────────────
+Devon,Carter,DE,NoCollege,22,76,265,55,EarlyDraftPick,1,5,80,76,70,82,76,78,80,76,68,,,,,,,,,,,,,,,,,,,,,,,82,86,78,84,80,74,72,,,,,,
+# ── LB (MLB) ─────────────────────────────────────────────────────────────────
+Chris,Navarro,MLB,NoCollege,23,73,240,54,LateDraftPick,2,35,74,74,70,80,72,74,78,74,72,,,,,,,,,,,,,,,,,,,,,,,,,80,80,78,68,60,,,,,
+# ── CB ───────────────────────────────────────────────────────────────────────
+Jaylen,Moore,CB,NoCollege,22,71,185,23,EarlyDraftPick,1,16,78,94,66,60,90,92,76,72,82,,,,,,,,,,,,,,,,,,,,,,,,,76,74,80,82,86,,,,
+# ── FS ───────────────────────────────────────────────────────────────────────
+Brandon,Ellis,FS,NoCollege,23,73,200,34,LateDraftPick,3,68,72,84,68,62,76,78,76,72,76,,,,,,,,,,,,,,,,,,,,,,,,,78,82,82,74,68,,,,
+# ── SS ───────────────────────────────────────────────────────────────────────
+Darius,King,SS,NoCollege,22,73,215,41,LateDraftPick,4,100,68,78,72,76,70,72,78,74,74,,,,,,,,,,,,,,,,,,,,,,,,,84,80,72,62,56,,,,
+# ── K ────────────────────────────────────────────────────────────────────────
+Matt,Reyes,K,NoCollege,23,71,185,7,Undrafted,7,220,65,52,60,58,54,54,72,72,54,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,90,86,60

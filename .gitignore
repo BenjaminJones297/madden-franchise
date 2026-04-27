@@ -60,8 +60,9 @@ typings/
 # next.js build output
 .next
 
-# custom scripts
-custom-scripts/
+# Custom scripts — tracked. Throwaway debug helpers stay ignored via _ prefix.
+custom-scripts/_*.mjs
+custom-scripts/_*.py
 
 # test packs
 pack/
