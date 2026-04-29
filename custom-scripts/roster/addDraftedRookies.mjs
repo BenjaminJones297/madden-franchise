@@ -429,21 +429,42 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
         }
     }
     const availableFictionals = allRookies.filter(rk => !usedRows.has(rk.row));
+    // Empty Player slots — used as fallback when fictional rookies run out
+    // (e.g. Madden generated 234 rookies but real draft has 257 picks).
+    let emptyCursor = 0;
+    function nextEmptySlot() {
+        while (emptyCursor < playerTable.records.length) {
+            const r = playerTable.records[emptyCursor];
+            if (r.isEmpty) return emptyCursor;
+            emptyCursor++;
+        }
+        return -1;
+    }
     let ficCursor = 0;
     for (const prospect of drafted) {
         // Skip if this prospect was already matched in phase 1
         if (phase1MatchedKeys.has(nameKey(prospect.firstName, prospect.lastName))) continue;
 
-        // Find next available fictional to stamp over.
+        // Try next available fictional first.
         while (ficCursor < availableFictionals.length && usedRows.has(availableFictionals[ficCursor].row)) {
             ficCursor++;
         }
-        if (ficCursor >= availableFictionals.length) {
-            stampLog.push(`  -  no slot available for ${prospect.firstName} ${prospect.lastName}`);
-            continue;
+        let rk, rec, fromEmpty = false;
+        if (ficCursor < availableFictionals.length) {
+            rk  = availableFictionals[ficCursor++];
+            rec = playerTable.records[rk.row];
+        } else {
+            // No fictional left — fall back to an empty Player slot.
+            const emptyIdx = nextEmptySlot();
+            if (emptyIdx < 0) {
+                stampLog.push(`  -  no slot available for ${prospect.firstName} ${prospect.lastName}`);
+                continue;
+            }
+            emptyCursor = emptyIdx + 1;
+            rec = playerTable.records[emptyIdx];
+            rk  = { row: emptyIdx, name: '(empty)' };
+            fromEmpty = true;
         }
-        const rk  = availableFictionals[ficCursor++];
-        const rec = playerTable.records[rk.row];
         const fullName = prospect.name || `${prospect.firstName} ${prospect.lastName}`.trim();
         const oldName  = `${rec.FirstName} ${rec.LastName}`.trim();
         const teamAbbr = teamMap[prospect.draftTeamId || ''] || null;
@@ -463,6 +484,26 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
             try { rec.YearsPro = 0; } catch {}
             try { rec.PLYR_DRAFTROUND = prospect.actual_draft_round || 1; } catch {}
             try { rec.PLYR_DRAFTPICK  = prospect.actual_draft_pick;       } catch {}
+            // For freshly-created records (from an empty slot) Madden has
+            // nothing in ContractStatus / Age / contract slots — set sensible
+            // defaults so the rookie is a usable, signed player.
+            if (fromEmpty) {
+                try { rec.ContractStatus = 'Signed'; } catch {}
+                try { rec.Age           = 22;      } catch {}
+                try { rec.JerseyNum     = 0;       } catch {}
+                try { rec.College       = 'NoCollege'; } catch {}
+                try { rec.YearDrafted   = 1;       } catch {}   // M26 relative encoding (current draft year)
+                try { rec.ContractLength = 4;      } catch {}
+                // Late-round rookie minimum slot money: ~$0.84M / yr split
+                // 90% salary, 10% bonus, in $10k units.
+                const aavU   = 84;   // 0.84M
+                const bonus  = Math.max(0, Math.round(aavU * 0.1));
+                const salary = aavU - bonus;
+                for (let s = 0; s < 8; s++) {
+                    try { rec[`ContractSalary${s}`] = (s < 4) ? salary : 0; } catch {}
+                    try { rec[`ContractBonus${s}`]  = (s < 4) ? bonus  : 0; } catch {}
+                }
+            }
 
             const ratings = prospect.ratings || {};
             for (const [src, dst] of Object.entries(RATING_FIELD_MAP)) {
