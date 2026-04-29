@@ -55,6 +55,166 @@ function writeOverallGrades(rec, ovr) {
     }
 }
 
+// ── PlayerType (archetype) selection ──
+// Madden re-computes per-archetype OVRs from attributes on load and uses
+// `PlayerType` to pick which archetype's value is the player's "primary" OVR
+// in the UI. If we leave PlayerType pointing at the previous fictional
+// rookie's archetype (e.g. S_Zone left over on a stamped guard's record),
+// the displayed OVR is computed from a formula that doesn't match the new
+// attributes — and the player shows up at his WORST archetype score.
+//
+// Each entry is [archetype_name, score_fn(ratings)].  Highest-scoring entry
+// wins.  Score functions return a heuristic 0..99-ish; absolute magnitudes
+// don't matter, only ranking within a position.
+
+function _avg(...vals) {
+    const filtered = vals.filter(v => typeof v === 'number');
+    return filtered.length ? filtered.reduce((a,b) => a + b, 0) / filtered.length : 0;
+}
+
+const ARCHETYPE_BY_POS = {
+    QB: [
+        ['QB_FieldGeneral', r => _avg(r.awareness, r.throwAccuracy, r.throwAccuracyShort, r.playAction, r.throwUnderPressure)],
+        ['QB_StrongArm',    r => _avg(r.throwPower, r.throwAccuracyDeep, r.throwOnTheRun)],
+        ['QB_Improviser',   r => _avg(r.throwOnTheRun, r.breakSack, r.speed*0.6, r.throwUnderPressure)],
+        ['QB_Scrambler',    r => _avg(r.speed, r.acceleration, r.breakTackle, r.stiffArm)],
+    ],
+    HB: [
+        ['HB_PowerBack',    r => _avg(r.strength, r.trucking, r.breakTackle, r.stiffArm)],
+        ['HB_ElusiveBack',  r => _avg(r.jukeMove, r.spinMove, r.agility, r.changeOfDirection)],
+        ['HB_ReceivingBack',r => _avg(r.catching, r.shortRouteRunning, r.release)],
+    ],
+    FB: [
+        ['FB_Blocking',     r => _avg(r.impactBlocking, r.leadBlock, r.runBlock, r.strength)],
+        ['FB_Utility',      r => _avg(r.catching, r.breakTackle, r.carrying)],
+    ],
+    WR: [
+        ['WR_DeepThreat',           r => _avg(r.speed, r.acceleration, r.deepRouteRunning)],
+        ['WR_Playmaker',            r => _avg(r.catching, r.spectacularCatch, r.catchInTraffic, r.changeOfDirection)],
+        ['WR_PhysicalRouteRunner',  r => _avg(r.shortRouteRunning, r.mediumRouteRunning, r.release, r.catching)],
+        ['WR_ShiftyRouteRunner',    r => _avg(r.shortRouteRunning, r.changeOfDirection, r.agility, r.release)],
+        ['WR_Physical',             r => _avg(r.strength, r.catchInTraffic, r.spectacularCatch)],
+        ['WR_Slot',                 r => _avg(r.shortRouteRunning, r.release, r.changeOfDirection)],
+    ],
+    TE: [
+        ['TE_VerticalThreat',        r => _avg(r.speed, r.deepRouteRunning, r.catching)],
+        ['TE_PhysicalRouteRunner',   r => _avg(r.shortRouteRunning, r.mediumRouteRunning, r.catching, r.release)],
+        ['TE_Possession',            r => _avg(r.catching, r.shortRouteRunning, r.catchInTraffic)],
+        ['TE_PossessionBlocking',    r => _avg(r.catching, r.runBlock, r.impactBlocking)],
+        ['TE_Blocking',              r => _avg(r.runBlock, r.impactBlocking, r.passBlock, r.strength)],
+    ],
+    T: [
+        ['OT_Power',         r => _avg(r.strength, r.runBlockPower, r.runBlock, r.impactBlocking, r.leadBlock)],
+        ['OT_PassProtector', r => _avg(r.passBlock, r.passBlockPower, r.passBlockFinesse, r.awareness)],
+        ['OT_Agile',         r => _avg(r.agility, r.changeOfDirection, r.speed, r.passBlockFinesse)],
+        ['OT_WellRounded',   r => _avg(r.passBlock, r.runBlock, r.awareness, r.strength)],
+    ],
+    G: [
+        ['G_Power',         r => _avg(r.strength, r.runBlockPower, r.runBlock, r.impactBlocking, r.leadBlock)],
+        ['G_PassProtector', r => _avg(r.passBlock, r.passBlockPower, r.passBlockFinesse, r.awareness)],
+        ['G_Agile',         r => _avg(r.agility, r.changeOfDirection, r.speed, r.passBlockFinesse)],
+        ['G_WellRounded',   r => _avg(r.passBlock, r.runBlock, r.awareness, r.strength)],
+    ],
+    C: [
+        ['C_Power',         r => _avg(r.strength, r.runBlockPower, r.runBlock, r.impactBlocking)],
+        ['C_PassProtector', r => _avg(r.passBlock, r.passBlockPower, r.passBlockFinesse, r.awareness)],
+        ['C_Agile',         r => _avg(r.agility, r.changeOfDirection, r.passBlockFinesse)],
+        ['C_WellRounded',   r => _avg(r.passBlock, r.runBlock, r.awareness, r.strength)],
+    ],
+    DE: [
+        ['DE_SmallerSpeedRusher', r => _avg(r.speed, r.acceleration, r.finesseMoves, r.agility)],
+        ['DE_PowerRusher',        r => _avg(r.powerMoves, r.strength, r.blockShedding)],
+        ['DE_PurePower',          r => _avg(r.strength, r.powerMoves, r.tackle)],
+        ['DE_RunStopper',         r => _avg(r.tackle, r.blockShedding, r.strength, r.hitPower)],
+    ],
+    DT: [
+        ['DT_NoseTackle',   r => _avg(r.strength, r.blockShedding, r.tackle, r.hitPower)],
+        ['DT_PurePower',    r => _avg(r.strength, r.powerMoves, r.tackle)],
+        ['DT_PowerRusher',  r => _avg(r.powerMoves, r.strength, r.blockShedding)],
+        ['DT_SpeedRusher',  r => _avg(r.speed, r.finesseMoves, r.acceleration)],
+    ],
+    OLB: [
+        ['OLB_SpeedRusher',  r => _avg(r.speed, r.finesseMoves, r.acceleration)],
+        ['OLB_PowerRusher',  r => _avg(r.powerMoves, r.strength, r.blockShedding)],
+        ['OLB_PassCoverage', r => _avg(r.zoneCoverage, r.manCoverage, r.playRecognition)],
+        ['OLB_RunStopper',   r => _avg(r.tackle, r.hitPower, r.blockShedding, r.pursuit)],
+    ],
+    MLB: [
+        ['MLB_FieldGeneral', r => _avg(r.awareness, r.playRecognition, r.zoneCoverage, r.tackle)],
+        ['MLB_PassCoverage', r => _avg(r.zoneCoverage, r.manCoverage, r.playRecognition)],
+        ['MLB_RunStopper',   r => _avg(r.tackle, r.hitPower, r.blockShedding, r.pursuit)],
+    ],
+    CB: [
+        ['CB_MantoMan',      r => _avg(r.manCoverage, r.pressCoverage, r.speed, r.acceleration)],
+        ['CB_Zone',          r => _avg(r.zoneCoverage, r.playRecognition, r.awareness)],
+        ['CB_HybridCorner',  r => _avg(r.manCoverage, r.zoneCoverage, r.tackle, r.hitPower)],
+        ['CB_Slot',          r => _avg(r.manCoverage, r.changeOfDirection, r.agility, r.shortRouteRunning ?? 50)],
+    ],
+    FS: [
+        ['S_Zone',          r => _avg(r.zoneCoverage, r.playRecognition, r.awareness)],
+        ['S_Hybrid',        r => _avg(r.zoneCoverage, r.manCoverage, r.tackle, r.hitPower)],
+        ['S_RunSupport',    r => _avg(r.tackle, r.hitPower, r.pursuit, r.blockShedding)],
+    ],
+    SS: [
+        ['S_RunSupport',    r => _avg(r.tackle, r.hitPower, r.pursuit, r.blockShedding)],
+        ['S_Hybrid',        r => _avg(r.zoneCoverage, r.manCoverage, r.tackle, r.hitPower)],
+        ['S_Zone',          r => _avg(r.zoneCoverage, r.playRecognition, r.awareness)],
+    ],
+    K: [
+        ['KP_Power',     r => r.kickPower    ?? 50],
+        ['KP_Accurate',  r => r.kickAccuracy ?? 50],
+    ],
+    P: [
+        ['KP_Power',     r => r.kickPower    ?? 50],
+        ['KP_Accurate',  r => r.kickAccuracy ?? 50],
+    ],
+    LS: [
+        ['LS_Accurate',  r => r.awareness ?? 60],
+        ['LS_Power',     r => r.strength  ?? 60],
+    ],
+};
+
+// Map Madden Position string -> our archetype-bucket key.
+const POS_BUCKET_FOR_ARCHETYPE = {
+    QB:'QB',
+    HB:'HB', RB:'HB',
+    FB:'FB',
+    WR:'WR',
+    TE:'TE',
+    LT:'T', RT:'T', T:'T', OT:'T',
+    LG:'G', RG:'G', G:'G', OG:'G',
+    C:'C',
+    LE:'DE', RE:'DE', DE:'DE',
+    DT:'DT', NT:'DT',
+    LOLB:'OLB', ROLB:'OLB', OLB:'OLB',
+    MLB:'MLB', ILB:'MLB',
+    CB:'CB',
+    FS:'FS',
+    SS:'SS',
+    K:'K',  P:'P',  LS:'LS',
+};
+
+function pickPlayerType(maddenPos, ratings) {
+    const bucket = POS_BUCKET_FOR_ARCHETYPE[(maddenPos || '').toUpperCase()];
+    const list = ARCHETYPE_BY_POS[bucket];
+    if (!list || !list.length) return null;
+    let best = null, bestScore = -Infinity;
+    for (const [name, fn] of list) {
+        const s = fn(ratings || {});
+        if (s > bestScore) { bestScore = s; best = name; }
+    }
+    return best;
+}
+
+function setArchetypeAndGrades(rec, maddenPos, ratings, ovr) {
+    // Pick + write the archetype this player should be displayed as.
+    const archetype = pickPlayerType(maddenPos, ratings);
+    if (archetype) {
+        try { rec.PlayerType = archetype; } catch {}
+    }
+    writeOverallGrades(rec, ovr);
+}
+
 // ── Madden TraitDevelopment is an enum: 0=Normal, 1=College_Impact,
 //    2=College_Star, 3=College_X-Factor.  The library accepts the string form
 //    reliably across all field-version variants; the integer form sometimes
@@ -412,7 +572,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
                         }
                     } catch {}
                 }
-                writeOverallGrades(rec, ourOvr);
+                setArchetypeAndGrades(rec, rec.Position, ratings, ourOvr);
                 ratingOverridden++;
             }
 
@@ -534,7 +694,8 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
                     }
                 } catch {}
             }
-            writeOverallGrades(rec, ratings.overall);
+            const stampedPos = (POSITION_MAP[(prospect.pos || '').toUpperCase()] || rec.Position);
+            setArchetypeAndGrades(rec, stampedPos, ratings, ratings.overall);
 
             usedRows.add(rk.row);
             slotStamped++;
