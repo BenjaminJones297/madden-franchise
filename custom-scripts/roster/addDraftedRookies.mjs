@@ -34,6 +34,7 @@ import path from 'path';
 import fs from 'fs';
 import FranchiseFile from '../../src/FranchiseFile.js';
 import { loadPool, predictOverallGrades, pickArchetypeFromOG } from './ogPredictor.mjs';
+import { buildOccupancyMap, reassignJersey } from './jerseyAssigner.mjs';
 
 // ── Default paths ────────────────────────────────────────────────────────────
 export const FRANCHISE_PATH =
@@ -541,6 +542,12 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
         process.exit(1);
     }
 
+    // Per-team jersey-occupancy map. Built from current state of the player
+    // table so rookies don't collide with vets or each other on the same team.
+    // Mutated as each rookie is assigned a number.
+    const occupancy = buildOccupancyMap(playerTable);
+    let jerseyAssigned = 0, jerseyKept = 0;
+
     // Build name & lastPos lookup tables for fast phase-1 matching.
     const rookieByName    = new Map();    // canon name -> rookie
     const rookieByLastPos = new Map();    // canon lastname|posGroup -> [rookies]
@@ -585,6 +592,12 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
         const ourOvr   = (prospect.ratings || {}).overall;
         const stored   = rec.OverallRating || 0;
 
+        // Capture pre-write state for jersey reassignment (so the helper can
+        // see the rec's true old (team, jersey) in the occupancy map before
+        // we overwrite TeamIndex below).
+        const phase1OldTeam   = rec.TeamIndex;
+        const phase1OldJersey = rec.JerseyNum;
+
         try {
             // Update team + draft slot.
             if (teamIdx !== undefined) {
@@ -592,6 +605,18 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
             }
             try { rec.PLYR_DRAFTROUND = prospect.actual_draft_round || 1; } catch {}
             try { rec.PLYR_DRAFTPICK  = prospect.actual_draft_pick;       } catch {}
+
+            // Jersey: keep Madden's auto-draft pick if it's already legal for
+            // the rookie's position AND free on the new team; otherwise
+            // reassign. Helper migrates the occupancy entry between old/new
+            // teams using the explicit oldTeam/oldJersey we captured above.
+            const phase1Pos = (prospect.pos || rec.Position || '').toUpperCase();
+            const r = reassignJersey(rec, phase1Pos, teamIdx, occupancy, {
+                allowKeep: true,
+                oldTeam:   phase1OldTeam,
+                oldJersey: phase1OldJersey,
+            });
+            if (r.changed) jerseyAssigned++; else if (r.kept) jerseyKept++;
 
             // Rating override: if our OVR is meaningfully higher than what's
             // stored (Madden auto-rated this rookie too low — e.g. Carson
@@ -710,6 +735,11 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
         const teamAbbr = teamMap[prospect.draftTeamId || ''] || null;
         const teamIdx  = teamAbbr !== null ? TEAM_INDEX[teamAbbr] : undefined;
 
+        // Capture pre-change state for jersey reassignment (since we're about
+        // to overwrite TeamIndex below).
+        const oldTeamForJersey   = rec.TeamIndex;
+        const oldJerseyForJersey = rec.JerseyNum;
+
         try {
             try { rec.FirstName = (prospect.firstName || fullName.split(' ')[0] || 'Unknown').slice(0, 17); } catch {}
             try { rec.LastName  = (prospect.lastName  || fullName.split(' ').slice(1).join(' ') || 'Player').slice(0, 21); } catch {}
@@ -724,6 +754,17 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
             try { rec.YearsPro = 0; } catch {}
             try { rec.PLYR_DRAFTROUND = prospect.actual_draft_round || 1; } catch {}
             try { rec.PLYR_DRAFTPICK  = prospect.actual_draft_pick;       } catch {}
+
+            // Jersey: always reassign for slot-stamps (the position usually
+            // changed from the fictional rookie). For empty-slot creates,
+            // oldJerseyForJersey is 0 so this just picks fresh.
+            const stampedPosForJersey = preferred || rec.Position || prospect.pos;
+            const jr = reassignJersey(rec, stampedPosForJersey, teamIdx, occupancy, {
+                allowKeep: false,
+                oldTeam:   oldTeamForJersey,
+                oldJersey: oldJerseyForJersey,
+            });
+            if (jr.changed) jerseyAssigned++;
             // For freshly-created records (from an empty slot) Madden has
             // nothing in ContractStatus / Age / contract slots — set sensible
             // defaults so the rookie is a usable, signed player.
@@ -737,7 +778,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
                 }
                 try { rec.ContractStatus = 'Signed'; } catch {}
                 try { rec.Age           = 22;      } catch {}
-                try { rec.JerseyNum     = 0;       } catch {}
+                // (JerseyNum is set by reassignJersey above.)
                 try { rec.YearDrafted   = 1;       } catch {}   // M26 relative encoding (current draft year)
                 try { rec.ContractLength = 4;      } catch {}
                 // Late-round rookie minimum slot money: ~$0.84M / yr split
@@ -780,6 +821,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
         }
     }
     console.log(`\nPhase 2 (slot stamp)  : ${slotStamped} prospects stamped onto fictional rookies`);
+    console.log(`Jerseys: ${jerseyAssigned} reassigned, ${jerseyKept} kept (already legal for position)`);
     if (stampLog.length && stampLog.length <= 30) stampLog.forEach(l => console.log(l));
 
     const stampedRows = usedRows;   // reused below by phase 3 + roster rebuild
