@@ -41,6 +41,20 @@ export const FRANCHISE_PATH =
 const DEFAULT_DATA_DIR =
     'C:/Users/benja/repos/madden-draft-class-generator/data';
 
+// ── Madden 26 displays the player's OVR as max(OverallGrade0..4) — the
+//    five per-archetype OVRs.  Our OverallRating field doesn't drive the
+//    in-game display.  To make a stamped prospect show our intended OVR we
+//    have to write at least one OverallGrade slot >= our OVR.  We write all
+//    five to our OVR (with a small spread so they look natural).
+function writeOverallGrades(rec, ovr) {
+    if (!ovr) return;
+    // Spread: best archetype = ovr, others = ovr-1, ovr-2, ovr-3, ovr-4 (clamped).
+    for (let i = 0; i < 5; i++) {
+        const v = Math.max(0, Math.min(99, ovr - i));
+        try { rec[`OverallGrade${i}`] = v; } catch {}
+    }
+}
+
 // ── Madden TraitDevelopment is an enum: 0=Normal, 1=College_Impact,
 //    2=College_Star, 3=College_X-Factor.  The library accepts the string form
 //    reliably across all field-version variants; the integer form sometimes
@@ -398,6 +412,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
                         }
                     } catch {}
                 }
+                writeOverallGrades(rec, ourOvr);
                 ratingOverridden++;
             }
 
@@ -519,6 +534,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
                     }
                 } catch {}
             }
+            writeOverallGrades(rec, ratings.overall);
 
             usedRows.add(rk.row);
             slotStamped++;
