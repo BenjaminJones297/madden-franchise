@@ -168,11 +168,79 @@ function parseHeight(ht) {
     return m ? parseInt(m[1]) * 12 + parseInt(m[2]) : 72;
 }
 
+// Group Madden positions to a coarse key for last+position fallback matching.
+// Handles LT/RT/T being interchangeable, LE/RE/DE etc.
+const POS_GROUP = {
+    LT:'OL', RT:'OL', T:'OL', OT:'OL',
+    LG:'OL', RG:'OL', G:'OL', OG:'OL', C:'OL', OL:'OL',
+    LE:'EDGE', RE:'EDGE', DE:'EDGE', EDGE:'EDGE', LOLB:'EDGE', ROLB:'EDGE',
+    DT:'DT', NT:'DT',
+    MLB:'LB', LB:'LB',
+    CB:'CB', DB:'CB',
+    FS:'S', SS:'S', SAF:'S',
+    QB:'QB', HB:'HB', RB:'HB', FB:'FB',
+    WR:'WR', TE:'TE',
+    K:'K', P:'P', LS:'LS',
+};
+function posGroup(p) { return POS_GROUP[(p || '').toUpperCase()] || (p || '').toUpperCase(); }
+
+// First-name aliases — handles cases where Madden's name pool uses a player's
+// preferred / nickname while NFL.com's API returns their legal name (or vice
+// versa). Add new entries as you find mismatches.  All values are the
+// CANONICAL form we collapse to.
+const FIRST_NAME_CANONICAL = {
+    // Standard nicknames
+    pat: 'patrick', patrick: 'patrick',
+    mike: 'michael', michael: 'michael', mikey: 'michael',
+    chris: 'christopher', christopher: 'christopher',
+    jon: 'jonathan', jonathan: 'jonathan', johnny: 'jonathan',
+    matt: 'matthew', matthew: 'matthew',
+    alex: 'alexander', alexander: 'alexander',
+    rob: 'robert', bob: 'robert', robert: 'robert', bobby: 'robert',
+    will: 'william', bill: 'william', william: 'william', billy: 'william',
+    tim: 'timothy', timothy: 'timothy', timmy: 'timothy',
+    tom: 'thomas', thomas: 'thomas', tommy: 'thomas',
+    ben: 'benjamin', benjamin: 'benjamin', benny: 'benjamin',
+    sam: 'samuel', samuel: 'samuel', sammy: 'samuel',
+    steve: 'stephen', stephen: 'stephen', steven: 'stephen', stevie: 'stephen',
+    joe: 'joseph', joseph: 'joseph', joey: 'joseph',
+    dan: 'daniel', daniel: 'daniel', danny: 'daniel',
+    nick: 'nicholas', nicholas: 'nicholas', nicky: 'nicholas',
+    tony: 'anthony', anthony: 'anthony',
+    drew: 'andrew', andy: 'andrew', andrew: 'andrew',
+    rick: 'richard', rich: 'richard', richard: 'richard', ricky: 'richard',
+    jim: 'james', jimmy: 'james', james: 'james',
+    eli: 'elijah', elijah: 'elijah',
+    max: 'maxwell', maxwell: 'maxwell', maxx: 'maxwell',
+    // 2026-class aliases (NFL.com's legal name vs Madden's preferred name)
+    sonny: 'alex',          // Sonny Styles -> Alex Styles
+    kc:    'kevin',         // KC Concepcion -> Kevin Concepcion
+    aj:    'adari',         // AJ Haulcy -> Adari Haulcy
+    cj:    'christopher',   // CJ Allen -> Christian/Chris Allen
+    tj:    'tomarrion',     // TJ Parker -> Tomarrion Parker
+    dj:    'davison',       // DJ Igbinosun -> Davison Igbinosun (actually Aimuamwosa)
+};
+
+function canonFirst(s) {
+    const k = (s || '').toLowerCase().replace(/[^a-z]/g, '');
+    return FIRST_NAME_CANONICAL[k] || k;
+}
+
 function norm(name) {
     return (name || '')
         .toLowerCase()
         .replace(/\s+(ii|iii|iv|v|jr|sr)\.?$/i, '')
         .replace(/[^a-z]/g, '');
+}
+
+// Combined first+last canonical key: nickname-stable.
+function nameKey(firstName, lastName) {
+    return canonFirst(firstName) + '|' + norm(lastName);
+}
+
+// Last name + position group fallback key.
+function lastPosKey(lastName, pos) {
+    return norm(lastName) + '|' + posGroup(pos);
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -228,170 +296,177 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
     console.log(`Player table   : ${playerTable.records.length} rows ` +
                 `(${playerTable.records.filter(r => !r.isEmpty).length} non-empty)`);
 
-    // ── Find Madden's fictional 2026 rookies via player-record draft fields ──
-    // YearsPro=0 + ContractStatus='Signed' + PLYR_DRAFTPICK>0 is a reliable
-    // marker. PLYR_DRAFTROUND=63 is Madden's compensatory-pick sentinel.
-    const fictionalRookies = [];
+    // ── Find every "rookie" record in the franchise (YearsPro=0 + Signed + has draft pick) ──
+    // These are split into:
+    //   - "real" rookies: name-matches one of our prospects (handles the case
+    //                     where Madden's auto-draft picked from the real pool)
+    //   - "fictional" rookies: rest. Get slot-stamped or purged.
+    const allRookies = [];
     for (let i = 0; i < playerTable.records.length; i++) {
         const r = playerTable.records[i];
         if (r.isEmpty) continue;
         if (r.YearsPro !== 0 || r.ContractStatus !== 'Signed') continue;
         if (!r.PLYR_DRAFTPICK || r.PLYR_DRAFTPICK <= 0) continue;
-        fictionalRookies.push({
+        allRookies.push({
             row:   i,
             round: r.PLYR_DRAFTROUND,
             pick:  r.PLYR_DRAFTPICK,
             name:  `${r.FirstName} ${r.LastName}`,
+            firstName: r.FirstName,
+            lastName:  r.LastName,
+            position:  r.Position,
         });
     }
-    const roundCounts = fictionalRookies.reduce((m, f) => {
+    const roundCounts = allRookies.reduce((m, f) => {
         m[f.round] = (m[f.round] || 0) + 1; return m;
     }, {});
-    console.log(`Fictional rookies : ${fictionalRookies.length}  by round: ${JSON.stringify(roundCounts)}`);
+    console.log(`Rookie records found : ${allRookies.length}  by round: ${JSON.stringify(roundCounts)}`);
 
-    if (fictionalRookies.length === 0) {
-        console.error('\nNo fictional 2026 rookies found.');
+    if (allRookies.length === 0) {
+        console.error('\nNo rookie records found.');
         console.error('Expected players with YearsPro=0, Signed, PLYR_DRAFTPICK > 0.');
         process.exit(1);
     }
 
-    // ── Build the matching plan: per-round, zip our prospects to fictional rookies ──
-    // For each round, sort fictionals by PLYR_DRAFTPICK and our prospects by
-    // actual_draft_pick (overall), then pair them by within-round position.
-    const fictionalsByRound = new Map();
-    for (const f of fictionalRookies) {
-        if (!fictionalsByRound.has(f.round)) fictionalsByRound.set(f.round, []);
-        fictionalsByRound.get(f.round).push(f);
-    }
-    for (const list of fictionalsByRound.values()) {
-        list.sort((a, b) => a.pick - b.pick);
-    }
-    const prospectsByRound = new Map();
-    for (const p of drafted) {
-        const rd = p.actual_draft_round || 1;
-        if (!prospectsByRound.has(rd)) prospectsByRound.set(rd, []);
-        prospectsByRound.get(rd).push(p);
-    }
-    for (const list of prospectsByRound.values()) {
-        list.sort((a, b) => a.actual_draft_pick - b.actual_draft_pick);
-    }
-
-    // Build the pair list: (fictional rookie row, real prospect)
-    const draftLinks = [];   // { round, posInRound, overallPick, playerRow, prospect }
-    let unmatchedFictionals = 0;
-    let unmatchedProspects  = 0;
-    for (const [round, ficList] of fictionalsByRound.entries()) {
-        const proList = prospectsByRound.get(round) || [];
-        const n = Math.min(ficList.length, proList.length);
-        for (let i = 0; i < n; i++) {
-            draftLinks.push({
-                round,
-                posInRound: i + 1,
-                overallPick: proList[i].actual_draft_pick,
-                playerRow:   ficList[i].row,
-                prospect:    proList[i],
-            });
+    // Build name & lastPos lookup tables for fast phase-1 matching.
+    const rookieByName    = new Map();    // canon name -> rookie
+    const rookieByLastPos = new Map();    // canon lastname|posGroup -> [rookies]
+    for (const rk of allRookies) {
+        const k1 = nameKey(rk.firstName, rk.lastName);
+        if (k1 && !rookieByName.has(k1)) rookieByName.set(k1, rk);
+        const k2 = lastPosKey(rk.lastName, rk.position);
+        if (k2) {
+            if (!rookieByLastPos.has(k2)) rookieByLastPos.set(k2, []);
+            rookieByLastPos.get(k2).push(rk);
         }
-        unmatchedFictionals += Math.max(0, ficList.length - proList.length);
-        unmatchedProspects  += Math.max(0, proList.length - ficList.length);
     }
-    console.log(`Slot pairs to stamp : ${draftLinks.length}`);
-    if (unmatchedFictionals) console.log(`  WARN: ${unmatchedFictionals} fictional rookies have no real prospect for their round`);
-    if (unmatchedProspects)  console.log(`  WARN: ${unmatchedProspects} real prospects have no Madden slot in their round`);
 
-    // ── Stamp real prospects onto the fictional rookies' rows ────────────────
-    const stampedRows = new Set();
-    let stamped = 0, missingProspect = 0, errors = 0;
-    const log = [];
+    // ── Phase 1: name-match — find prospects already in the franchise ────────
+    // For matched prospects, only update their team + draft slot. Don't touch
+    // ratings/identity (they're often pre-filled with M26's published ratings,
+    // which are more accurate than what we'd re-stamp).
+    const usedRows = new Set();
+    let nameMatched = 0, slotStamped = 0, errors = 0;
+    const matchLog  = [];
+    const stampLog  = [];
 
-    for (const link of draftLinks) {
-        const prospect = link.prospect;
-        const rec = playerTable.records[link.playerRow];
-        if (!rec || rec.isEmpty) {
-            errors++;
-            log.push(`  X  pick ${link.overallPick}: row ${link.playerRow} empty/missing`);
-            continue;
-        }
+    function findRookieFor(prospect) {
+        const k1 = nameKey(prospect.firstName, prospect.lastName);
+        const m1 = rookieByName.get(k1);
+        if (m1 && !usedRows.has(m1.row)) return { rk: m1, how: 'name' };
+        // Last+pos fallback (only when unique)
+        const k2 = lastPosKey(prospect.lastName, prospect.pos);
+        const candidates = (rookieByLastPos.get(k2) || []).filter(r => !usedRows.has(r.row));
+        if (candidates.length === 1) return { rk: candidates[0], how: 'last+pos' };
+        return null;
+    }
 
-        const fullName = prospect.name
-            || `${prospect.firstName} ${prospect.lastName}`.trim();
-        const oldName  = `${rec.FirstName} ${rec.LastName}`.trim();
+    for (const prospect of drafted) {
+        const m = findRookieFor(prospect);
+        if (!m) continue;
 
-        // Resolve real drafting team — required for the team swap.
+        const rec      = playerTable.records[m.rk.row];
         const teamAbbr = teamMap[prospect.draftTeamId || ''] || null;
         const teamIdx  = teamAbbr !== null ? TEAM_INDEX[teamAbbr] : undefined;
 
         try {
-            // Identity. Madden's FirstName is an enum-restricted field — many
-            // first names map to a "canonical" form (Max -> Maxwell, etc.) or
-            // even an unrelated name when the requested string isn't in the
-            // enum dictionary. Try the requested name; the library will pick
-            // the closest valid enum entry. LastName is free-form text.
-            try { rec.FirstName = (prospect.firstName || fullName.split(' ')[0] || 'Unknown').slice(0, 17); } catch {}
-            try { rec.LastName  = (prospect.lastName  || fullName.split(' ').slice(1).join(' ') || 'Player').slice(0, 21); } catch {}
-
-            // Position — try preferred Madden form, fall back to current
-            const preferred = POSITION_MAP[(prospect.pos || '').toUpperCase()];
-            if (preferred) {
-                try { rec.Position = preferred; } catch { /* enum may reject specific letter form */ }
-            }
-
-            // Physicals. Madden stores Weight as `actualLbs - 160`
-            // (Mahomes 225lbs -> stored 65, Tyreek Hill 191 -> 31, Lamar 210 -> 50).
-            try { rec.Height = parseHeight(prospect.ht); } catch {}
-            try {
-                const lbs    = Math.round(prospect.wt) || (rec.Weight + 160);
-                rec.Weight   = Math.max(0, Math.min(255, lbs - 160));
-            } catch {}
-
-            // Team assignment — use the REAL drafting team, not whoever Madden
-            // assigned this slot to. Madden's AI re-creates a fictional draft
-            // order, so without this swap a record stamped at "R1#1" would
-            // sit on whatever team Madden's AI gave the first overall pick to.
+            // Update team + draft slot only (preserve existing ratings + identity).
             if (teamIdx !== undefined) {
                 try { rec.TeamIndex = teamIdx; } catch {}
             }
+            try { rec.PLYR_DRAFTROUND = prospect.actual_draft_round || 1; } catch {}
+            try { rec.PLYR_DRAFTPICK  = prospect.actual_draft_pick;       } catch {}
 
-            // YearsPro=0 just to be safe; preserve YearDrafted relative encoding.
+            usedRows.add(m.rk.row);
+            nameMatched++;
+            matchLog.push(
+                `  =  R${prospect.actual_draft_round} #${String(prospect.actual_draft_pick).padStart(3)}` +
+                `  ${(teamAbbr || '?').padEnd(4)}  ${m.rk.name.padEnd(28)} (${m.how}, OVR=${rec.OverallRating})`
+            );
+        } catch (err) {
+            errors++;
+            matchLog.push(`  X  ${m.rk.name}: ${err.message}`);
+        }
+    }
+    console.log(`\nPhase 1 (name match)  : ${nameMatched} prospects updated team/slot only (ratings preserved)`);
+    if (matchLog.length && matchLog.length <= 30) matchLog.forEach(l => console.log(l));
+
+    // ── Phase 2: slot-stamp — for prospects NOT name-matched, find any unused
+    //   rookie record (fictional) and stamp our identity + ratings onto it. ──
+    // Track which prospects we matched in phase 1 so we know who's left.
+    const phase1MatchedKeys = new Set();
+    for (const rk of allRookies) {
+        if (usedRows.has(rk.row)) {
+            phase1MatchedKeys.add(nameKey(rk.firstName, rk.lastName));
+        }
+    }
+    const availableFictionals = allRookies.filter(rk => !usedRows.has(rk.row));
+    let ficCursor = 0;
+    for (const prospect of drafted) {
+        // Skip if this prospect was already matched in phase 1
+        if (phase1MatchedKeys.has(nameKey(prospect.firstName, prospect.lastName))) continue;
+
+        // Find next available fictional to stamp over.
+        while (ficCursor < availableFictionals.length && usedRows.has(availableFictionals[ficCursor].row)) {
+            ficCursor++;
+        }
+        if (ficCursor >= availableFictionals.length) {
+            stampLog.push(`  -  no slot available for ${prospect.firstName} ${prospect.lastName}`);
+            continue;
+        }
+        const rk  = availableFictionals[ficCursor++];
+        const rec = playerTable.records[rk.row];
+        const fullName = prospect.name || `${prospect.firstName} ${prospect.lastName}`.trim();
+        const oldName  = `${rec.FirstName} ${rec.LastName}`.trim();
+        const teamAbbr = teamMap[prospect.draftTeamId || ''] || null;
+        const teamIdx  = teamAbbr !== null ? TEAM_INDEX[teamAbbr] : undefined;
+
+        try {
+            try { rec.FirstName = (prospect.firstName || fullName.split(' ')[0] || 'Unknown').slice(0, 17); } catch {}
+            try { rec.LastName  = (prospect.lastName  || fullName.split(' ').slice(1).join(' ') || 'Player').slice(0, 21); } catch {}
+            const preferred = POSITION_MAP[(prospect.pos || '').toUpperCase()];
+            if (preferred) try { rec.Position = preferred; } catch {}
+            try { rec.Height = parseHeight(prospect.ht); } catch {}
+            try {
+                const lbs = Math.round(prospect.wt) || (rec.Weight + 160);
+                rec.Weight = Math.max(0, Math.min(255, lbs - 160));
+            } catch {}
+            if (teamIdx !== undefined) try { rec.TeamIndex = teamIdx; } catch {}
             try { rec.YearsPro = 0; } catch {}
+            try { rec.PLYR_DRAFTROUND = prospect.actual_draft_round || 1; } catch {}
+            try { rec.PLYR_DRAFTPICK  = prospect.actual_draft_pick;       } catch {}
 
-            // Ratings — overwrite every mapped field. devTrait is enum-string;
-            // everything else is uint8 (0-99). Madden mirrors most ratings into
-            // an `Original*Rating` slot used as the "rookie / baseline" anchor;
-            // we write both so in-game OVR derivation matches our stored OVR.
             const ratings = prospect.ratings || {};
             for (const [src, dst] of Object.entries(RATING_FIELD_MAP)) {
                 const v = ratings[src];
                 if (v === undefined || v === null) continue;
                 try {
                     if (dst === 'TraitDevelopment') {
-                        const enumStr = DEV_TRAIT_TO_STRING[Math.max(0, Math.min(3, v))] || 'Normal';
-                        rec[dst] = enumStr;
+                        rec[dst] = DEV_TRAIT_TO_STRING[Math.max(0, Math.min(3, v))] || 'Normal';
                     } else {
                         const clamped = Math.max(0, Math.min(99, Math.round(v)));
                         rec[dst] = clamped;
-                        // Mirror to Original* counterpart when the schema has it.
-                        const origField = 'Original' + dst;
-                        try { rec[origField] = clamped; } catch { /* not all fields have Original* */ }
+                        try { rec['Original' + dst] = clamped; } catch {}
                     }
-                } catch { /* ignore unwritable */ }
+                } catch {}
             }
 
-            stampedRows.add(link.playerRow);
-            stamped++;
-            log.push(
+            usedRows.add(rk.row);
+            slotStamped++;
+            stampLog.push(
                 `  +  R${prospect.actual_draft_round} #${String(prospect.actual_draft_pick).padStart(3)}` +
-                `  ${(teamAbbr || '?').padEnd(4)}  ${oldName.padEnd(26)} -> ${fullName.padEnd(26)} (${preferred || rec.Position})`
+                `  ${(teamAbbr || '?').padEnd(4)}  ${oldName.padEnd(26)} -> ${fullName.padEnd(26)}`
             );
         } catch (err) {
             errors++;
-            log.push(`  X  pick ${link.overallPick} (${fullName}): ${err.message}`);
+            stampLog.push(`  X  ${fullName}: ${err.message}`);
         }
     }
+    console.log(`\nPhase 2 (slot stamp)  : ${slotStamped} prospects stamped onto fictional rookies`);
+    if (stampLog.length && stampLog.length <= 30) stampLog.forEach(l => console.log(l));
 
-    console.log(`\nStamped         : ${stamped}`);
-    console.log(`No matching prospect for slot : ${missingProspect}`);
-    console.log(`Errors          : ${errors}`);
+    const stampedRows = usedRows;   // reused below by phase 3 + roster rebuild
+    const stamped = nameMatched + slotStamped;
 
     // ── Purge fictional 2026 UDFAs / unstamped rookies ───────────────────────
     // YearsPro=0 + ContractStatus in {FreeAgent, Signed} that we DIDN'T stamp.
@@ -438,8 +513,10 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
         console.log('Purge skipped (--no-purge set).');
     }
 
-    if (log.length && log.length <= 60) log.forEach(l => console.log(l));
-    else if (log.length) console.log(`(${log.length} stamp transactions)`);
+    const totalLog = matchLog.length + stampLog.length;
+    if (totalLog > 30) {
+        console.log(`(${matchLog.length} name matches + ${stampLog.length} slot stamps; pass --verbose to list)`);
+    }
 
     // ── Rebuild per-team Roster arrays so the new TeamIndexes show up in
     //    depth charts. Same logic as applyRosters.mjs's rebuildRosters().
