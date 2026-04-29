@@ -35,6 +35,7 @@ import fs from 'fs';
 import FranchiseFile from '../../src/FranchiseFile.js';
 import { loadPool, predictOverallGrades, pickArchetypeFromOG } from './ogPredictor.mjs';
 import { buildOccupancyMap, reassignJersey } from './jerseyAssigner.mjs';
+import { pickBodyType } from './bodyTypeAssigner.mjs';
 
 // ── Default paths ────────────────────────────────────────────────────────────
 export const FRANCHISE_PATH =
@@ -547,6 +548,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
     // Mutated as each rookie is assigned a number.
     const occupancy = buildOccupancyMap(playerTable);
     let jerseyAssigned = 0, jerseyKept = 0;
+    let bodyTypeAssigned = 0;
 
     // Build name & lastPos lookup tables for fast phase-1 matching.
     const rookieByName    = new Map();    // canon name -> rookie
@@ -674,11 +676,14 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
     // etc. — Madden's UI renders these as malformed players (OVR=0 in game).
     // Copying valid Reference values from a donor record makes empty-slot
     // creates render correctly.
+    // CharacterBodyType is intentionally NOT in this list — we set it per
+    // prospect from (position, height, weight) via bodyTypeAssigner so an
+    // empty-slot OL doesn't inherit the donor's "Standard" build.
     const DONOR_REF_FIELDS = [
         'College', 'CharacterVisuals', 'PLYR_ASSETNAME',
         'GenericHeadAssetName', 'PLYR_BIRTHDATE', 'PLYR_GENERICHEAD',
         'PLYR_HANDEDNESS', 'PLYR_QBSTYLE', 'PLYR_STYLE',
-        'CharacterBodyType', 'PortraitSwappableLibraryPath',
+        'PortraitSwappableLibraryPath',
         'RunningStyleRating', 'PlayerVisMoveType',
     ];
     const donor = allRookies[0];
@@ -765,6 +770,19 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
                 oldJersey: oldJerseyForJersey,
             });
             if (jr.changed) jerseyAssigned++;
+
+            // Body type: pick from (position, height, weight) so the rookie
+            // doesn't inherit the fictional rookie's (or donor's) build.
+            try {
+                const btPos    = preferred || rec.Position || prospect.pos;
+                const btHeight = rec.Height;
+                const btWeight = (rec.Weight || 0) + 160;
+                const bt = pickBodyType(btPos, btHeight, btWeight);
+                if (bt) {
+                    rec.CharacterBodyType = bt;
+                    bodyTypeAssigned++;
+                }
+            } catch {}
             // For freshly-created records (from an empty slot) Madden has
             // nothing in ContractStatus / Age / contract slots — set sensible
             // defaults so the rookie is a usable, signed player.
@@ -822,6 +840,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
     }
     console.log(`\nPhase 2 (slot stamp)  : ${slotStamped} prospects stamped onto fictional rookies`);
     console.log(`Jerseys: ${jerseyAssigned} reassigned, ${jerseyKept} kept (already legal for position)`);
+    console.log(`Body types: ${bodyTypeAssigned} assigned from (position, height, weight)`);
     if (stampLog.length && stampLog.length <= 30) stampLog.forEach(l => console.log(l));
 
     const stampedRows = usedRows;   // reused below by phase 3 + roster rebuild
