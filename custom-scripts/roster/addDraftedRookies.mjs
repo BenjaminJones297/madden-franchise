@@ -604,6 +604,32 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
         }
     }
     const availableFictionals = allRookies.filter(rk => !usedRows.has(rk.row));
+
+    // Capture a "donor template" from the first untouched fictional rookie.
+    // Empty Player slots have null References for College / CharacterVisuals /
+    // etc. — Madden's UI renders these as malformed players (OVR=0 in game).
+    // Copying valid Reference values from a donor record makes empty-slot
+    // creates render correctly.
+    const DONOR_REF_FIELDS = [
+        'College', 'CharacterVisuals', 'PLYR_ASSETNAME',
+        'GenericHeadAssetName', 'PLYR_BIRTHDATE', 'PLYR_GENERICHEAD',
+        'PLYR_HANDEDNESS', 'PLYR_QBSTYLE', 'PLYR_STYLE',
+        'CharacterBodyType', 'PortraitSwappableLibraryPath',
+        'RunningStyleRating', 'PlayerVisMoveType',
+    ];
+    const donor = allRookies[0];
+    const donorRec = donor ? playerTable.records[donor.row] : null;
+    const donorTemplate = {};
+    if (donorRec) {
+        for (const f of DONOR_REF_FIELDS) {
+            try {
+                const v = donorRec[f];
+                if (v !== undefined && v !== null && v !== '')
+                    donorTemplate[f] = v;
+            } catch {}
+        }
+    }
+
     // Empty Player slots — used as fallback when fictional rookies run out
     // (e.g. Madden generated 234 rookies but real draft has 257 picks).
     let emptyCursor = 0;
@@ -663,10 +689,16 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
             // nothing in ContractStatus / Age / contract slots — set sensible
             // defaults so the rookie is a usable, signed player.
             if (fromEmpty) {
+                // Copy structural fields (College ref, visuals, etc.) from
+                // the donor template BEFORE setting the per-prospect fields.
+                // Without this, Madden's UI renders the player as OVR=0
+                // because the College reference is the null all-zeros ref.
+                for (const [f, v] of Object.entries(donorTemplate)) {
+                    try { rec[f] = v; } catch {}
+                }
                 try { rec.ContractStatus = 'Signed'; } catch {}
                 try { rec.Age           = 22;      } catch {}
                 try { rec.JerseyNum     = 0;       } catch {}
-                try { rec.College       = 'NoCollege'; } catch {}
                 try { rec.YearDrafted   = 1;       } catch {}   // M26 relative encoding (current draft year)
                 try { rec.ContractLength = 4;      } catch {}
                 // Late-round rookie minimum slot money: ~$0.84M / yr split
