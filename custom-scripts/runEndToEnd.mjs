@@ -89,8 +89,11 @@ async function runStep1(franchise, output, dataDir, source) {
         console.log('\n(Skipping vet rating overlay — --no-source set.)');
     }
 
-    console.log(`\nStep 1 complete. Open ${target} in Madden, advance one week, exit.`);
-    console.log(`Then run: node runEndToEnd.mjs --fix-archetypes --franchise ${target}-AUTOSAVE --output <final>`);
+    console.log(`\nPipeline complete: ${target}`);
+    console.log(`If data/franchise_ratings.json was present, OverallGrade0..4 were predicted offline`);
+    console.log(`from M26 player records (no Madden advance needed; load and play).`);
+    console.log(`If you DO advance a week, you can run --fix-archetypes against the AUTOSAVE for`);
+    console.log(`a final pass that uses Madden's actual recomputed values.`);
 }
 
 async function runFixArchetypes(franchise, output) {

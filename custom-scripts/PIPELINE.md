@@ -30,6 +30,23 @@ If any of these are stale, see the **Refresh data** section below.
 
 ## The Pipeline
 
+### Single-pass mode (recommended — no Madden advance required)
+
+If `data/franchise_ratings.json` is present (extracted from `CAREER-OFFICIAL` via `custom-scripts/extractFranchiseRatings.mjs`), the pipeline uses **offline OG prediction**: for each rookie it finds K-nearest M26 player records by attribute similarity and averages their `OverallGrade0..4` arrays. The result approximates what Madden would compute on its archetype-formula recompute.
+
+```powershell
+node custom-scripts/runEndToEnd.mjs `
+  --franchise "C:/.../CAREER-INPUT" `
+  --output    "C:/.../CAREER-FINAL" `
+  --no-source
+```
+
+That's it — load `CAREER-FINAL` in Madden and the displayed OVRs will already match the OG values we wrote. **No week advance needed.**
+
+### Two-pass mode (when you want Madden's exact recompute)
+
+Use this only if `franchise_ratings.json` is missing or stale, OR if you want to verify against Madden's truth.
+
 ### Step 1 — Run the franchise pipeline
 
 Single command. Reads the data files, writes a new franchise file:

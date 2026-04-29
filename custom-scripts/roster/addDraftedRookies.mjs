@@ -33,6 +33,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
 import FranchiseFile from '../../src/FranchiseFile.js';
+import { loadPool, predictOverallGrades, pickArchetypeFromOG } from './ogPredictor.mjs';
 
 // ── Default paths ────────────────────────────────────────────────────────────
 export const FRANCHISE_PATH =
@@ -213,6 +214,35 @@ function setArchetypeAndGrades(rec, maddenPos, ratings, ovr) {
         try { rec.PlayerType = archetype; } catch {}
     }
     writeOverallGrades(rec, ovr);
+}
+
+/**
+ * Predict OG[0..4] from K-nearest M26 player records (franchise_ratings.json),
+ * pick PlayerType from the archetype with the max predicted OG, and write
+ * everything to the record. This eliminates the need for a Madden week
+ * advance to recompute OG from attributes — the predicted values are
+ * close enough to Madden's actual recompute that the displayed OVR
+ * (max(OG)) on file load matches our intent.
+ *
+ * Falls back to setArchetypeAndGrades (uniform descending OG values) if
+ * the predictor doesn't have data for the position.
+ */
+function setArchetypeFromPrediction(rec, maddenPos, ratings, fallbackOvr) {
+    const og = predictOverallGrades(maddenPos, rec);
+    if (!og) {
+        // No franchise_ratings.json data or no pool entries — fallback path
+        return setArchetypeAndGrades(rec, maddenPos, ratings, fallbackOvr);
+    }
+    const pick = pickArchetypeFromOG(maddenPos, og);
+    if (!pick) {
+        return setArchetypeAndGrades(rec, maddenPos, ratings, fallbackOvr);
+    }
+    try { rec.PlayerType = pick.playerType; } catch {}
+    for (let i = 0; i < 5; i++) {
+        try { rec[`OverallGrade${i}`] = og[i]; } catch {}
+    }
+    try { rec.OverallRating         = pick.ovr; } catch {}
+    try { rec.OriginalOverallRating = pick.ovr; } catch {}
 }
 
 // ── Madden TraitDevelopment is an enum: 0=Normal, 1=College_Impact,
@@ -439,6 +469,15 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
 
     const ratedPath   = path.join(dataDir, 'prospects_rated.json');
     const teamMapPath = path.join(dataDir, 'nfl_team_id_to_abbr.json');
+    // Optional: pool of real M26 players with their Madden-computed OG values.
+    // If present, use it to predict each rookie's OG[0..4] offline so the
+    // displayed in-game OVR is correct on first load (no advance needed).
+    const franchiseRatingsPath = path.join(dataDir, 'franchise_ratings.json');
+    if (loadPool(franchiseRatingsPath)) {
+        console.log(`OG predictor: loaded pool from ${path.basename(franchiseRatingsPath)}`);
+    } else {
+        console.log(`OG predictor: ${path.basename(franchiseRatingsPath)} not found — falling back to uniform-descending OG values (Madden advance required to recompute).`);
+    }
     if (!fs.existsSync(ratedPath))   { console.error(`Missing: ${ratedPath}`);   process.exit(1); }
     if (!fs.existsSync(teamMapPath)) { console.error(`Missing: ${teamMapPath}`); process.exit(1); }
 
@@ -572,7 +611,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
                         }
                     } catch {}
                 }
-                setArchetypeAndGrades(rec, rec.Position, ratings, ourOvr);
+                setArchetypeFromPrediction(rec, rec.Position, ratings, ourOvr);
                 ratingOverridden++;
             }
 
@@ -727,7 +766,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
                 } catch {}
             }
             const stampedPos = (POSITION_MAP[(prospect.pos || '').toUpperCase()] || rec.Position);
-            setArchetypeAndGrades(rec, stampedPos, ratings, ratings.overall);
+            setArchetypeFromPrediction(rec, stampedPos, ratings, ratings.overall);
 
             usedRows.add(rk.row);
             slotStamped++;
