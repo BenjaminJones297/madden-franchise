@@ -361,6 +361,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
         return null;
     }
 
+    let ratingOverridden = 0;
     for (const prospect of drafted) {
         const m = findRookieFor(prospect);
         if (!m) continue;
@@ -368,25 +369,52 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
         const rec      = playerTable.records[m.rk.row];
         const teamAbbr = teamMap[prospect.draftTeamId || ''] || null;
         const teamIdx  = teamAbbr !== null ? TEAM_INDEX[teamAbbr] : undefined;
+        const ourOvr   = (prospect.ratings || {}).overall;
+        const stored   = rec.OverallRating || 0;
 
         try {
-            // Update team + draft slot only (preserve existing ratings + identity).
+            // Update team + draft slot.
             if (teamIdx !== undefined) {
                 try { rec.TeamIndex = teamIdx; } catch {}
             }
             try { rec.PLYR_DRAFTROUND = prospect.actual_draft_round || 1; } catch {}
             try { rec.PLYR_DRAFTPICK  = prospect.actual_draft_pick;       } catch {}
 
+            // Rating override: if our OVR is meaningfully higher than what's
+            // stored (Madden auto-rated this rookie too low — e.g. Carson
+            // Beck at 60 when his profile suggests 67), use ours.
+            const ratings = prospect.ratings || {};
+            if (ourOvr && stored && ourOvr - stored >= 5) {
+                for (const [src, dst] of Object.entries(RATING_FIELD_MAP)) {
+                    const v = ratings[src];
+                    if (v === undefined || v === null) continue;
+                    try {
+                        if (dst === 'TraitDevelopment') {
+                            rec[dst] = DEV_TRAIT_TO_STRING[Math.max(0, Math.min(3, v))] || 'Normal';
+                        } else {
+                            const clamped = Math.max(0, Math.min(99, Math.round(v)));
+                            rec[dst] = clamped;
+                            try { rec['Original' + dst] = clamped; } catch {}
+                        }
+                    } catch {}
+                }
+                ratingOverridden++;
+            }
+
             usedRows.add(m.rk.row);
             nameMatched++;
+            const flag = (ourOvr && stored && ourOvr - stored >= 5) ? '*' : ' ';
             matchLog.push(
-                `  =  R${prospect.actual_draft_round} #${String(prospect.actual_draft_pick).padStart(3)}` +
-                `  ${(teamAbbr || '?').padEnd(4)}  ${m.rk.name.padEnd(28)} (${m.how}, OVR=${rec.OverallRating})`
+                `  =${flag} R${prospect.actual_draft_round} #${String(prospect.actual_draft_pick).padStart(3)}` +
+                `  ${(teamAbbr || '?').padEnd(4)}  ${m.rk.name.padEnd(28)} (${m.how}, OVR=${stored}${flag === '*' ? ` -> ${ourOvr}` : ''})`
             );
         } catch (err) {
             errors++;
             matchLog.push(`  X  ${m.rk.name}: ${err.message}`);
         }
+    }
+    if (ratingOverridden) {
+        console.log(`  (${ratingOverridden} prospects had our OVR > stored OVR + 5; rating overridden)`);
     }
     console.log(`\nPhase 1 (name match)  : ${nameMatched} prospects updated team/slot only (ratings preserved)`);
     if (matchLog.length && matchLog.length <= 30) matchLog.forEach(l => console.log(l));
