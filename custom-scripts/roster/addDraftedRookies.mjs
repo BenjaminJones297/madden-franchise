@@ -620,6 +620,11 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
             });
             if (r.changed) jerseyAssigned++; else if (r.kept) jerseyKept++;
 
+            // Zero out XP — even name-matched rookies inherit XP accumulated
+            // during Madden's auto-draft simulation; real rookies start fresh.
+            try { rec.SkillPoints      = 0; } catch {}
+            try { rec.ExperiencePoints = 0; } catch {}
+
             // Rating override: if our OVR is meaningfully higher than what's
             // stored (Madden auto-rated this rookie too low — e.g. Carson
             // Beck at 60 when his profile suggests 67), use ours.
@@ -783,6 +788,12 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
                     bodyTypeAssigned++;
                 }
             } catch {}
+
+            // Zero out XP — fictional rookies accumulated SkillPoints /
+            // ExperiencePoints during Madden's auto-draft simulation. Real
+            // rookies should start fresh.
+            try { rec.SkillPoints      = 0; } catch {}
+            try { rec.ExperiencePoints = 0; } catch {}
             // For freshly-created records (from an empty slot) Madden has
             // nothing in ContractStatus / Age / contract slots — set sensible
             // defaults so the rookie is a usable, signed player.
