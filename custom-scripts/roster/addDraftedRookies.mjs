@@ -36,6 +36,7 @@ import FranchiseFile from '../../src/FranchiseFile.js';
 import { loadPool, predictOverallGrades, pickArchetypeFromOG } from './ogPredictor.mjs';
 import { buildOccupancyMap, reassignJersey } from './jerseyAssigner.mjs';
 import { pickBodyType } from './bodyTypeAssigner.mjs';
+import { pickAge, loadAgeIndex } from './ageAssigner.mjs';
 
 // ── Default paths ────────────────────────────────────────────────────────────
 export const FRANCHISE_PATH =
@@ -549,6 +550,19 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
     const occupancy = buildOccupancyMap(playerTable);
     let jerseyAssigned = 0, jerseyKept = 0;
     let bodyTypeAssigned = 0;
+    let ageAssigned = 0;
+
+    // Merge DOB + college_class into each prospect so pickAge can produce
+    // an exact age (DOB) or a class-based estimate (Senior=22, Junior=21).
+    const ageIndex = loadAgeIndex();
+    let dobMerged = 0, classMerged = 0;
+    for (const p of drafted) {
+        const a = p.nfl_id && ageIndex.get(p.nfl_id);
+        if (!a) continue;
+        if (a.dob) { p.dob = a.dob; dobMerged++; }
+        if (a.college_class) { p.college_class = a.college_class; classMerged++; }
+    }
+    console.log(`Age data: ${dobMerged} DOBs + ${classMerged} college_class fallbacks merged into ${drafted.length} drafted prospects`);
 
     // Build name & lastPos lookup tables for fast phase-1 matching.
     const rookieByName    = new Map();    // canon name -> rookie
@@ -624,6 +638,13 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
             // during Madden's auto-draft simulation; real rookies start fresh.
             try { rec.SkillPoints      = 0; } catch {}
             try { rec.ExperiencePoints = 0; } catch {}
+
+            // Age: prefer DOB-derived age over Madden's auto-draft estimate.
+            try {
+                const age = pickAge(prospect);
+                rec.Age = age;
+                ageAssigned++;
+            } catch {}
 
             // Rating override: if our OVR is meaningfully higher than what's
             // stored (Madden auto-rated this rookie too low — e.g. Carson
@@ -794,6 +815,15 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
             // rookies should start fresh.
             try { rec.SkillPoints      = 0; } catch {}
             try { rec.ExperiencePoints = 0; } catch {}
+
+            // Age: prefer DOB (Wikipedia-scraped) over class-based estimate
+            // over Madden's auto-draft inherited age.
+            try {
+                const age = pickAge(prospect);
+                rec.Age = age;
+                ageAssigned++;
+            } catch {}
+
             // For freshly-created records (from an empty slot) Madden has
             // nothing in ContractStatus / Age / contract slots — set sensible
             // defaults so the rookie is a usable, signed player.
@@ -806,7 +836,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
                     try { rec[f] = v; } catch {}
                 }
                 try { rec.ContractStatus = 'Signed'; } catch {}
-                try { rec.Age           = 22;      } catch {}
+                // (Age is set above via pickAge — no fallback needed here.)
                 // (JerseyNum is set by reassignJersey above.)
                 try { rec.YearDrafted   = 1;       } catch {}   // M26 relative encoding (current draft year)
                 try { rec.ContractLength = 4;      } catch {}
@@ -852,6 +882,7 @@ export async function addDraftedRookies(franchisePath, dataDir, outputPath, opts
     console.log(`\nPhase 2 (slot stamp)  : ${slotStamped} prospects stamped onto fictional rookies`);
     console.log(`Jerseys: ${jerseyAssigned} reassigned, ${jerseyKept} kept (already legal for position)`);
     console.log(`Body types: ${bodyTypeAssigned} assigned from (position, height, weight)`);
+    console.log(`Ages: ${ageAssigned} assigned (DOB/class-derived; default 22 if both missing)`);
     if (stampLog.length && stampLog.length <= 30) stampLog.forEach(l => console.log(l));
 
     const stampedRows = usedRows;   // reused below by phase 3 + roster rebuild
