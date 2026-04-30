@@ -189,6 +189,18 @@ export async function applyRosters(franchisePath, rosterJsonPath, outputPath) {
     const players = JSON.parse(fs.readFileSync(resolvedRoster, 'utf8'));
     console.log(`Roster data : ${players.length} players`);
 
+    // Hand-curated FA overrides — real-life FAs that nflverse doesn't list
+    // (e.g. recently released vets like Christian Wilkins). Each entry is
+    // {firstName, lastName, position?}; merged into the lookup as team='FA'
+    // so applyRosters moves them to free agency instead of leaving Madden's
+    // stale team assignment in place.
+    const knownFasPath = path.join(path.dirname(resolvedRoster), 'known_fas.json');
+    let knownFas = [];
+    if (fs.existsSync(knownFasPath)) {
+        knownFas = JSON.parse(fs.readFileSync(knownFasPath, 'utf8'));
+        console.log(`Known FAs   : ${knownFas.length} hand-curated overrides`);
+    }
+
     // Build lookup: normName → array of matching real players
     // (multiple players can share the same normalized name, e.g. "john johnson")
     const lookup = new Map();
@@ -203,6 +215,28 @@ export async function applyRosters(franchisePath, rosterJsonPath, outputPath) {
         const lnKey = `${normLast(p.lastName)}|${(p.position || '').toUpperCase()}`;
         if (!lastPosLookup.has(lnKey)) lastPosLookup.set(lnKey, []);
         lastPosLookup.get(lnKey).push(p);
+    }
+
+    // Apply known-FA overrides AFTER the main map so they take precedence
+    // for any name collisions (nflverse may still list a FA if their data
+    // is stale; the override forces FA).
+    for (const fa of knownFas) {
+        const fullName = `${fa.firstName} ${fa.lastName}`.trim();
+        const key  = norm(fullName);
+        const entry = {
+            firstName: fa.firstName,
+            lastName:  fa.lastName,
+            fullName,
+            position:  fa.position || '',
+            team:      'FA',
+            contractYears: 0,
+            contractAAV:   0,
+            contractTotal: 0,
+            yearSigned:    CURRENT_YEAR,
+        };
+        lookup.set(key, [entry]);
+        const lnKey = `${normLast(fa.lastName)}|${(fa.position || '').toUpperCase()}`;
+        lastPosLookup.set(lnKey, [entry]);
     }
 
     // ── Backup + open franchise ───────────────────────────────────────────────
