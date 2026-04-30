@@ -33,7 +33,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
 import FranchiseFile from '../../src/FranchiseFile.js';
-import { loadPool, predictOverallGrades, pickArchetypeFromOG } from './ogPredictor.mjs';
+import { loadPool, predictOverallGrades, pickArchetypeFromOG, POSITION_ARCHETYPE_BY_SLOT } from './ogPredictor.mjs';
 import { buildOccupancyMap, reassignJersey } from './jerseyAssigner.mjs';
 import { pickBodyType } from './bodyTypeAssigner.mjs';
 import { pickAge, loadAgeIndex } from './ageAssigner.mjs';
@@ -236,16 +236,35 @@ function setArchetypeFromPrediction(rec, maddenPos, ratings, fallbackOvr) {
         // No franchise_ratings.json data or no pool entries — fallback path
         return setArchetypeAndGrades(rec, maddenPos, ratings, fallbackOvr);
     }
-    const pick = pickArchetypeFromOG(maddenPos, og);
-    if (!pick) {
-        return setArchetypeAndGrades(rec, maddenPos, ratings, fallbackOvr);
+    // Pick PlayerType using ARCHETYPE_BY_POS score functions (deterministic
+    // and aligned with Madden's archetype-OVR formulas), not the OG predictor's
+    // K-NN max-slot. The K-NN approach picked the wrong archetype for Chase
+    // Bisontis (G_Agile instead of G_Power) because his neighbors in the M26
+    // pool happened to be G_Agile-tagged guards with similar size, but his
+    // strength/run-block stats clearly fit G_Power. The score function
+    // computes the canonical archetype-OVR formula from his actual stats and
+    // is more reliable.
+    const archetype = pickPlayerType(maddenPos, ratings);
+    const slotList = POSITION_ARCHETYPE_BY_SLOT[(maddenPos || '').toUpperCase()];
+    let bestSlot = -1;
+    if (archetype && slotList) {
+        bestSlot = slotList.indexOf(archetype);
     }
-    try { rec.PlayerType = pick.playerType; } catch {}
-    for (let i = 0; i < 5; i++) {
-        try { rec[`OverallGrade${i}`] = og[i]; } catch {}
+    if (bestSlot < 0) {
+        // Score-function/slot-list mismatch — fall back to predictor-max.
+        const pick = pickArchetypeFromOG(maddenPos, og);
+        if (!pick) return setArchetypeAndGrades(rec, maddenPos, ratings, fallbackOvr);
+        try { rec.PlayerType = pick.playerType; } catch {}
+        for (let i = 0; i < 5; i++) try { rec[`OverallGrade${i}`] = og[i]; } catch {}
+        try { rec.OverallRating         = pick.ovr; } catch {}
+        try { rec.OriginalOverallRating = pick.ovr; } catch {}
+        return;
     }
-    try { rec.OverallRating         = pick.ovr; } catch {}
-    try { rec.OriginalOverallRating = pick.ovr; } catch {}
+    const ovr = og[bestSlot] || fallbackOvr || 0;
+    try { rec.PlayerType = archetype; } catch {}
+    for (let i = 0; i < 5; i++) try { rec[`OverallGrade${i}`] = og[i]; } catch {}
+    try { rec.OverallRating         = ovr; } catch {}
+    try { rec.OriginalOverallRating = ovr; } catch {}
 }
 
 // ── Madden TraitDevelopment is an enum: 0=Normal, 1=College_Impact,
