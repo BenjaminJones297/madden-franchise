@@ -151,6 +151,33 @@ function writeContract(record, aavDollars, remainingYears) {
     }
 }
 
+// nflverse's contract data is stale for many stars — it often shows their
+// original rookie deal even after a multi-year extension. Result: high-AAV
+// players end up with remainingYears=1 and the franchise becomes a wave of
+// FAs in 2027. Apply an AAV-based floor: players on real big-money deals
+// almost certainly have multiple years left, so synthesize a sensible
+// minimum length even if the stored "yearSigned + contractYears" math
+// says otherwise.
+function aavMinYears(aavDollars) {
+    if (!aavDollars) return 1;
+    if (aavDollars >= 20_000_000) return 4;
+    if (aavDollars >= 10_000_000) return 3;
+    if (aavDollars >= 5_000_000)  return 2;
+    return 1;   // depth/vet-min — let them flip yearly (realistic)
+}
+
+// Some stars have stale AAV in nflverse (e.g. Lamar Jackson at $900k,
+// Justin Jefferson at $3.3M from old rookie deals). OVR is a proxy for
+// "this player almost certainly has a long extension" — overlay it on
+// top of the AAV floor so 90+ players get at least 4 years and 85+ get 3.
+function ovrMinYears(ovr) {
+    if (!ovr || typeof ovr !== 'number') return 1;
+    if (ovr >= 90) return 4;
+    if (ovr >= 85) return 3;
+    if (ovr >= 80) return 2;
+    return 1;
+}
+
 function getArg(argv, flag) {
     const idx = argv.indexOf(flag);
     return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : null;
@@ -259,6 +286,7 @@ export async function applyRosters(franchisePath, rosterJsonPath, outputPath) {
     await playerTable.readRecords([
         'FirstName', 'LastName', 'Position',
         'ContractStatus', 'TeamIndex',
+        'OverallRating',                     // for OVR-based contract length floor
         ...CONTRACT_FIELDS,
     ]);
 
@@ -334,7 +362,15 @@ export async function applyRosters(franchisePath, rosterJsonPath, outputPath) {
                 const yearSigned = real.yearSigned    || CURRENT_YEAR;
                 const elapsed    = Math.max(0, CURRENT_YEAR - yearSigned);
                 const remaining  = Math.max(1, totalYears - elapsed);
-                writeContract(record, real.contractAAV, remaining);
+                // AAV-based + OVR-based floors handle stale-extension cases
+                // where nflverse still shows the original rookie/franchise
+                // tag (Lamar Jackson at $900k, Jefferson at $3.3M, etc.).
+                const finalYears = Math.max(
+                    remaining,
+                    aavMinYears(real.contractAAV),
+                    ovrMinYears(record.OverallRating),
+                );
+                writeContract(record, real.contractAAV, finalYears);
             }
 
             updated++;
