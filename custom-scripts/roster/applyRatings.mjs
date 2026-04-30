@@ -218,6 +218,10 @@ export async function applyRatings(franchisePath, sourcePath) {
     for (const dst of dstTable.records) {
         if (dst.isEmpty) continue;
         if (dst.ContractStatus === 'Draft') { skipped++; continue; }
+        // Don't overlay rookies — addDraftedRookies has already stamped them
+        // with our generated ratings + archetype + visuals from prospects_rated.
+        // CAREER-OFFICIAL would replace those with EA's auto-rated values.
+        if (dst.YearsPro === 0) { skipped++; continue; }
 
         const key = norm(`${dst.FirstName} ${dst.LastName}`);
         if (!key) { skipped++; continue; }
