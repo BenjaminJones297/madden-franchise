@@ -96,6 +96,36 @@ const RATING_FIELDS = [
     'TraitDevelopment',   // dev trait (enum-string)
 ];
 
+// Appearance / identity reference fields. These get nulled out when a
+// player is "Deleted" in a franchise (e.g. retirement). When applyRosters
+// resurrects them onto a real-life team, the visuals stay zeroed and
+// Madden falls back to a generic head + default jersey for that player.
+// We overlay these from the source ONLY when the dst value is null/zero
+// so we don't trample legit custom appearance edits.
+const APPEARANCE_FIELDS = [
+    'CharacterVisuals',         // 32-bit ref to the 4KB visuals blob (binary string in this lib)
+    'PLYR_ASSETNAME',           // EA asset id like 'LawrenceDeMarcus_11079'
+    'GenericHeadAssetName',     // generic head fallback name (gen_*_*_*)
+    'PLYR_GENERICHEAD',
+    'PLYR_HANDEDNESS',
+    'PLYR_QBSTYLE',
+    'PLYR_STYLE',
+    'PortraitSwappableLibraryPath',
+    'RunningStyleRating',
+    'PlayerVisMoveType',
+];
+
+// Treat all-zero binary refs and empty strings as "null" — those are the
+// states left behind when a record is deleted/retired in the franchise.
+function isNullVisualsRef(v) {
+    if (v === undefined || v === null) return true;
+    if (typeof v === 'string') {
+        if (v === '') return true;
+        if (/^0+$/.test(v)) return true;   // 32-bit reference all zeros
+    }
+    return false;
+}
+
 // Fields to read for identification
 const ID_FIELDS = ['FirstName', 'LastName', 'Position', 'ContractStatus'];
 
@@ -216,6 +246,21 @@ export async function applyRatings(franchisePath, sourcePath) {
             if (origVal !== undefined && origVal !== null) {
                 try { dst[origField] = origVal; } catch (_) {}
             }
+        }
+
+        // Restore appearance refs only when the target's are null — preserves
+        // any in-franchise custom appearance edits but fixes deleted/retired
+        // vets who got resurrected by applyRosters (their CharacterVisuals
+        // get zeroed at delete time, so Madden falls back to a generic head).
+        for (const field of APPEARANCE_FIELDS) {
+            try {
+                if (!isNullVisualsRef(dst[field])) continue;
+                const val = src[field];
+                if (val === undefined || val === null) continue;
+                if (typeof val === 'string' && (val === '' || /^0+$/.test(val))) continue;
+                dst[field] = val;
+                changed = true;
+            } catch (_) {}
         }
 
         if (changed) {
