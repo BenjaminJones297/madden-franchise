@@ -178,6 +178,17 @@ export async function applyRatings(franchisePath, sourcePath) {
     // Read all fields so we can also pull Original*Rating values when present.
     await srcTable.readRecords();
 
+    // CharacterVisuals table: when Madden's auto-sim retires a player, it
+    // marks their visuals row as deleted (free-list bytes set in the row
+    // header) even though the underlying RawData JSON blob is still intact.
+    // applyRosters resurrects the player and we restore their reference,
+    // but the row itself stays "deleted" so Madden falls back to a generic
+    // appearance. Reading both the source and target visuals tables here
+    // lets us copy the row header bytes from source over the target's,
+    // un-deleting the row.
+    const srcVisuals = srcFile.getTableByName('CharacterVisuals');
+    if (srcVisuals) await srcVisuals.readRecords();
+
     // Build lookup: normName → best matching record (highest OverallRating wins ties)
     const srcLookup = new Map();
     for (const rec of srcTable.records) {
@@ -205,6 +216,8 @@ export async function applyRatings(franchisePath, sourcePath) {
     const dstFile  = await FranchiseFile.create(resolvedFranchise);
     const dstTable = dstFile.getTableByName('Player');
     await dstTable.readRecords();
+    const dstVisuals = dstFile.getTableByName('CharacterVisuals');
+    if (dstVisuals) await dstVisuals.readRecords();
 
     const total = dstTable.records.filter(r => !r.isEmpty).length;
     console.log(`Target players: ${total} non-empty records\n`);
@@ -264,6 +277,28 @@ export async function applyRatings(franchisePath, sourcePath) {
                 if (typeof val === 'string' && (val === '' || /^0+$/.test(val))) continue;
                 dst[field] = val;
                 changed = true;
+            } catch (_) {}
+        }
+
+        // Un-delete the CharacterVisuals row itself if Madden's sim flagged
+        // it for deletion. The reference field is back to a real value, but
+        // Madden treats `isEmpty=true` rows as gone and falls back to a
+        // generic appearance even though the JSON blob is still intact.
+        // Copy the source row's 8-byte header over the target's to clear
+        // the free-list bytes.
+        if (srcVisuals && dstVisuals) {
+            try {
+                const dstFields = Object.values(dst._fields || {});
+                const dstField  = dstFields.find(x => x._offset && x._offset.name === 'CharacterVisuals');
+                const ref = dstField && dstField.referenceData;
+                if (ref && typeof ref.rowNumber === 'number') {
+                    const dstRow = dstVisuals.records[ref.rowNumber];
+                    const srcRow = srcVisuals.records[ref.rowNumber];
+                    if (dstRow && srcRow && dstRow.isEmpty && !srcRow.isEmpty) {
+                        srcRow._data.copy(dstRow._data);
+                        dstRow._isChanged = true;
+                    }
+                }
             } catch (_) {}
         }
 
